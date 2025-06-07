@@ -750,7 +750,8 @@ extension Sourcery {
 
                 if let (filePath, inlineRanges, inlineIndentations) = parsingResult.inlineRanges.first(where: { $0.ranges[key] != nil }) {
                     // swiftlint:disable:next force_unwrapping
-                    return MappedInlineAnnotations(range, filePath, inlineRanges[key]!, generatedBody, inlineIndentations[key] ?? "")
+                    //TODO: It might break regular inlined ranges
+                    return MappedInlineAnnotations(range, filePath, inlineRanges[key]!, generatedBody, "")
                 }
 
 
@@ -760,6 +761,7 @@ extension Sourcery {
                 }
 
                 enum AutoType: String {
+                    case endOfFile = "eof-"
                     case after = "after-"
                     case normal = ""
                 }
@@ -773,11 +775,23 @@ extension Sourcery {
                 guard let definition = parsingResult.types.types.first(where: { $0.name == autoTypeName }),
                     let filePath = definition.path,
                     let path = definition.path.map({ Path($0) }),
-                    let contents = try? path.read(.utf8),
-                    let bodyRange = bodyRange(for: definition, contentsView: StringView(contents)) else {
-                        rangesToReplace.remove(range)
-                        return nil
+                    let contents = try? path.read(.utf8) else {
+                    rangesToReplace.remove(range)
+                    return nil
                 }
+
+                if autoType == .endOfFile {
+                    let rangeInFile = NSRange(location: contents.bridge().length, length: 0)
+                    toInsert = "\n// sourcery:inline:\(key)\n\(generatedBody)// sourcery:end\n"
+
+                    return MappedInlineAnnotations(range, filePath, rangeInFile, toInsert, "")
+                }
+
+                guard let bodyRange = bodyRange(for: definition, contentsView: StringView(contents)) else {
+                    rangesToReplace.remove(range)
+                    return nil
+                }
+
                 let bodyEndRange = NSRange(location: NSMaxRange(bodyRange), length: 0)
                 let bodyEndLineRange = contents.bridge().lineRange(for: bodyEndRange)
                 let bodyEndLine = contents.bridge().substring(with: bodyEndLineRange)
@@ -795,6 +809,8 @@ extension Sourcery {
                 case .normal:
                     rangeInFile = NSRange(location: max(bodyRange.location, bodyEndLineRange.location), length: 0)
                     toInsert += "\n"
+                case .endOfFile:
+                    fatalError("never reachable :\(#line)")
                 }
 
                 let indent = String(repeating: " ", count: (indentRange?.location ?? 0) + baseIndentation)
